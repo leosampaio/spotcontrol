@@ -20,11 +20,15 @@ var sController *spotcontrol.SpircController
 var controlledDeviceName *string
 
 type UserRequest struct {
-  Id  string `json:"id"`
+    Id  string `json:"id"`
+}
+
+type TracklistRequest struct {
+    Ids  []string `json:"ids"`
 }
 
 type UserCommand struct {
-  Command  string `json:"command"`
+    Command  string `json:"command"`
 }
 
 func main() {
@@ -48,10 +52,7 @@ func main() {
     } else if os.Getenv("client_secret") != "" {
         sController, err = spotcontrol.LoginOauth(*devicename)
     } else {
-        fmt.Println("need to supply a username and password or a blob file path")
-        fmt.Println("./spirccontroller --blobPath ./path/to/blob")
-        fmt.Println("or")
-        fmt.Println("./spirccontroller --username SPOTIFY_USERNAME --password SPOTIFY_PASSWORD")
+        fmt.Println("./server-controller --username SPOTIFY_USERNAME --password SPOTIFY_PASSWORD --devicename DEVICE_NAME")
         return
     }
 
@@ -65,6 +66,7 @@ func main() {
     router := mux.NewRouter()
     router.HandleFunc("/", Index)
     router.HandleFunc("/track", PlayTrack).Methods("POST")
+    router.HandleFunc("/tracks", PlayTracks).Methods("POST")
     router.HandleFunc("/playlists", PlayPlaylist).Methods("POST")
     router.HandleFunc("/playlists", GetPlaylists).Methods("GET")
     router.HandleFunc("/command", ExecuteCommand).Methods("POST")
@@ -98,10 +100,37 @@ func PlayTrack(w http.ResponseWriter, r *http.Request) {
     decoder := json.NewDecoder(r.Body)
     decoder.Decode(&ur)
 
-    trackArray := []string{ur.Id}
+    id := strings.TrimPrefix(ur.Id, "spotify:track:")
+    trackArray := []string{id}
 
     var device = getDevice()
     sController.LoadTrack(device.Ident, trackArray)
+
+    sController.SendPlay(device.Ident)
+
+    status := map[string]string {
+        "status": "sucess",
+    }
+
+    json.NewEncoder(w).Encode(status)
+}
+
+func PlayTracks(w http.ResponseWriter, r *http.Request) {
+    var tr TracklistRequest
+    decoder := json.NewDecoder(r.Body)
+    decoder.Decode(&tr)
+
+    items := tr.Ids
+    var ids []string
+    for i := 0; i < len(items); i++ {
+        id := strings.TrimPrefix(items[i], "spotify:track:")
+        ids = append(ids, id)
+    }
+
+    var device = getDevice()
+    sController.LoadTrack(device.Ident, ids)
+
+    sController.SendPlay(device.Ident)
 
     status := map[string]string {
         "status": "sucess",
@@ -115,8 +144,11 @@ func PlayPlaylist(w http.ResponseWriter, r *http.Request) {
     var ur UserRequest
     decoder := json.NewDecoder(r.Body)
     decoder.Decode(&ur)
+
+    id := strings.TrimPrefix(ur.Id, "spotify:")
+    id = strings.Replace(id, ":", "/", -1)
     
-    playlist, err := sController.GetPlaylist(ur.Id)
+    playlist, err := sController.GetPlaylist(id)
     if err != nil || playlist.Contents == nil {
         fmt.Println("Playlist not found")
         w.WriteHeader(http.StatusNotFound)
